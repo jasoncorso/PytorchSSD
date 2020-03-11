@@ -62,7 +62,7 @@ class ObjectDetector:
     def __init__(self, net, detection, transform, num_classes=21, cuda=False, max_per_image=300, thresh=0.5):
         self.net = net
         self.detection = detection
-        self.transform = transform
+        self.transform = transform  # not currently used!
         self.max_per_image = 300
         self.num_classes = num_classes
         self.max_per_image = max_per_image
@@ -74,7 +74,26 @@ class ObjectDetector:
                               img.shape[1], img.shape[0]]).cpu().numpy()
         _t = {'im_detect': Timer(), 'misc': Timer()}
         assert img.shape[2] == 3
-        x = Variable(self.transform(img).unsqueeze(0), volatile=True)
+        # testing what should be done in the transform
+        print('*** transforming the image ***')
+
+        rgb_means = (104/255, 117/255, 123/255)
+        rgb_std = (1, 1, 1)
+        print(rgb_means)
+
+        print(np.max(img))
+        img_ = etai.resize(img, width=300, height=300)
+        img_ -= rgb_means
+        img_ /= rgb_std
+        print(np.max(img_))
+        print(np.min(img_))
+
+        img_ = img_.transpose((2, 0, 1))
+        x = torch.from_numpy(img_)
+        x = Variable(x.unsqueeze(0), volatile=True)
+        print(x.shape)
+        print('*** finished transforming the image ***')
+
         if self.cuda:
             x = x.to("cuda")
         _t['im_detect'].tic()
@@ -98,7 +117,6 @@ class ObjectDetector:
                 continue
             c_bboxes = boxes[inds]
             c_scores = scores[inds, j]
-            print(scores[:, j])
             c_dets = np.hstack((c_bboxes, c_scores[:, np.newaxis])).astype(
                 np.float32, copy=False)
             # keep = nms(c_bboxes,c_scores)
@@ -131,6 +149,7 @@ priorbox = PriorBox(cfg)
 # noting the interpreter message that volatile=True no longer has any effect
 # and it should rather be done with `with torch.no_grad()`
 priors = Variable(priorbox.forward(), volatile=True)
+print(priors)
 
 net = SSD.build_net(img_dim, num_classes)
 
@@ -155,7 +174,7 @@ net.eval()
 net.to("cuda")
 
 print("finished loading the model")
-print(net)
+#print(net)
 print("net.size is %s" % net.size)  # just outputs 300 flat (unsure if this is
 # torch field or only in this library
 
@@ -168,14 +187,29 @@ rgb_std = (1, 1, 1)
 #  this needs to be rewritten.
 # note that the last part is just swapping axes so that HWC --> CHW
 transform = BaseTransform(net.size, rgb_means, rgb_std, (2, 0, 1))
-object_detector = ObjectDetector(net, detector, transform, num_classes, True)
+object_detector = ObjectDetector(net, detector, transform, num_classes, True,
+                                 300, 0.1)
 
 print('Loading image..')
+# Noting that the mean in this code is given in [0,255] range, but then the
+# stdev is 1, 1, 1, which doesn't make great sense to me.
+# There is no documentation about the expectation manipulation of the data...
+#
+# the etai.read will read [0, 255] but the etai.to_double will map to [0,1]
+#
 # the baseTransform in this library will do all the resizing and datatype
 # conversion
-#image = etai.read('http://images.cocodataset.org/val2017/000000252219.jpg')
-image = etai.read('http://images.cocodataset.org/val2017/000000397133.jpg')
+image = etai.read('http://images.cocodataset.org/val2017/000000252219.jpg')
+#image = etai.read('http://images.cocodataset.org/val2017/000000397133.jpg')
 #image = etai.read('http://images.cocodataset.org/val2017/000000037777.jpg')
+# I just did the following to explore the possibility that none of the persons
+# in the above images were detected because of the data format issue mainly.
+# It did not seem to be the case.
+#image = etai.rgb_to_bgr(image)
+# Let's get a VOC image
+#image = etai.read('/scratch/jason-data/voc2007/VOCdevkit/VOC2007/JPEGImages/000001.jpg')
+
+image = etai.to_float(image)
 
 print('running the prediction')
 with torch.no_grad():
